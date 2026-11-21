@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "WORKCODE Work Timer",
+  "version": "1.1.0",
+  "description": "Tells your company's WORKCODE timer whether the page in front is WORKCODE, an approved website, or something else. Never reads page content.",
+  "minimum_chrome_version": "120",
+  "permissions": ["tabs", "idle", "storage", "alarms"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "WORKCODE Work Timer", "default_popup": "popup.html" }
+}

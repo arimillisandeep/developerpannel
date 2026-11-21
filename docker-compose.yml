@@ -1,0 +1,70 @@
+# WORKCODE in Docker Desktop: PostgreSQL + backend + frontend.
+# Start:  docker compose up --build        Stop:  Ctrl+C  (or: docker compose down)
+# Open :  http://localhost:5173
+# The data lives in the Docker volume "workcode_pgdata" and stays there between starts.
+# pgAdmin: host localhost, port 5434, user postgres, password workcode, database workcode_v2.
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: workcode
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - workcode_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WORKCODE_SETUP_AUTO: "1"
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: workcode
+      PGDATABASE: workcode_v2
+      RUNNER_ENABLED: "true"
+      RUNNER_WORK_DIR: /runs
+      RUNNER_VOLUME: workcode_runs
+      # The workspace terminal gets internet access so "npm install" / "pip install" work.
+      # Set to "none" to cut the terminal off from every network.
+      TERMINAL_NETWORK: bridge
+      # Ports of the terminal that can be opened in the Preview tab (dev servers: npm run dev, flask run, ...).
+      # Each gets a free port on 127.0.0.1 of this PC. Use 0.0.0.0 only when other computers must reach them.
+      TERMINAL_PORTS: "3000,3001,4173,4200,5000,5173,8000,8080"
+      TERMINAL_PORTS_BIND: 127.0.0.1
+    volumes:
+      - ./backend:/app
+      - workcode_runs:/runs
+      # Lets the backend start the throw-away containers for Run and the terminal.
+      # This gives the backend control over Docker on this PC: fine for a local test, not for a shared server.
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "127.0.0.1:8000:8000"
+    # setup_local.py is safe to run on every start: it creates the database and backend/.env
+    # only when they are missing, updates the tables, and adds demo accounts only to an empty database.
+    command: sh -c "python setup_local.py && exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    environment:
+      WORKCODE_API: http://backend:8000
+      # The browser reaches the API on the published port; WebSockets go straight there instead of through the
+      # dev server's proxy (which drops terminal upgrades now and then, killing 2nd/3rd terminal tabs).
+      WORKCODE_WS: http://localhost:8000
+    ports:
+      - "127.0.0.1:5173:5173"
+
+volumes:
+  workcode_pgdata:
+  workcode_runs:
+    name: workcode_runs

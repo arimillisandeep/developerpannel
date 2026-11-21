@@ -1,0 +1,22 @@
+# Use the PostgreSQL that is installed on this PC (pgAdmin / Windows service) instead of the PostgreSQL in Docker.
+#
+# 1. Create a file named  .env  next to this file with (your own values):
+#        LOCAL_PGPASSWORD=your-postgres-password
+#        LOCAL_PGPORT=5432
+# 2. Start:  docker compose -f docker-compose.yml -f docker-compose.localdb.yml up --build
+#
+# The database "workcode_v2" and its tables are created by themselves on the first start.
+# The data is then stored by the PostgreSQL of this PC, and stays there when Docker is removed.
+services:
+  db:
+    profiles: ["docker-db"]          # the PostgreSQL container is not started in this mode
+  backend:
+    depends_on: !reset []
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PGHOST: ${LOCAL_PGHOST:-host.docker.internal}
+      PGPORT: "${LOCAL_PGPORT:-5432}"
+      PGUSER: ${LOCAL_PGUSER:-postgres}
+      PGPASSWORD: ${LOCAL_PGPASSWORD:?Create the .env file with LOCAL_PGPASSWORD (see docker-compose.localdb.yml)}
+      PGDATABASE: ${LOCAL_PGDATABASE:-workcode_v2}

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WORKCODE Work Timer</title>
+<style>
+  body{font:14px/1.45 system-ui,sans-serif;width:330px;margin:0;padding:14px;background:#0f1320;color:#e7ebf3}
+  h1{font-size:15px;margin:0 0 8px}
+  p{margin:6px 0}.muted{color:#93a0b8;font-size:12.5px}
+  textarea{width:100%;box-sizing:border-box;min-height:64px;background:#171c2c;color:#e7ebf3;border:1px solid #2a3147;border-radius:8px;padding:8px;font:12px monospace}
+  button{background:#4f6ef7;color:#fff;border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer;margin-top:8px}
+  button.plain{background:#232a3f}
+  .box{background:#171c2c;border:1px solid #2a3147;border-radius:10px;padding:10px;margin:8px 0}
+  .ok{color:#2fd07f}.warn{color:#e3b04b}.bad{color:#f04f5f}
+  ul{margin:6px 0;padding-left:18px}
+</style>
+</head>
+<body>
+  <h1>WORKCODE Work Timer</h1>
+  <div id="connected" hidden>
+    <div class="box"><div>Connected to <b id="origin"></b></div><div id="state"></div><div class="muted" id="when"></div></div>
+    <button class="plain" id="disconnect">Disconnect</button>
+  </div>
+  <div id="setup" hidden>
+    <p>In WORKCODE open <b>Monitoring</b> (admins) → <b>Create connection code</b>, then paste it here.</p>
+    <textarea id="code" aria-label="Connection code" placeholder="http://…|eyJ…"></textarea>
+    <button id="connect">Connect</button>
+    <p class="bad" id="error" role="alert"></p>
+  </div>
+  <div class="box muted">
+    <b>What this extension sends to your company's WORKCODE server</b>
+    <ul><li>the kind of page in front: WORKCODE, approved website, other website, or browser not in front</li>
+      <li>the name of the website only when it is on the approved list</li>
+      <li>whether the computer was used in the last 5 minutes</li></ul>
+    <b>Never collected:</b> page content, page titles, addresses of other websites, passwords, messages, history.
+  </div>
+<script type="module" src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+import httpx, io, zipfile
+import os
+B=os.environ.get("WORKCODE_API","http://127.0.0.1:8000/api")
+def login(e):
+    r=httpx.post(B+"/auth/login",json={"email":e,"password":"Workcode@123"}); r.raise_for_status()
+    return httpx.Client(base_url=B,headers={"Authorization":"Bearer "+r.json()["access_token"]},timeout=20)
+ad,lead,onr,off,intern=[login(x+"@workcode.local") for x in ("admin","reviewer","onroll","offroll","intern")]
+me={n:c.get("/auth/me").json() for n,c in dict(lead=lead,onr=onr,off=off,intern=intern).items()}
+ok=[]
+def chk(name,cond,extra=""):
+    ok.append(cond); print(("PASS " if cond else "FAIL ")+name, extra if not cond else "")
+r=ad.post("/tasks",json={"title":"Live check task","assigned_to_ids":[me["intern"]["id"],me["off"]["id"]],"reviewer_id":me["lead"]["id"],"deliverables":"zip","requirements":"page"})
+chk("admin multi-assign creates 2 tasks",r.status_code==201 and len(r.json()["created"])==2,r.text)
+tid=r.json()["created"][0]["id"]; tid_off=r.json()["created"][1]["id"]
+r=ad.post(f"/tasks/{tid}/attachments",files={"file":("spec.txt",b"spec","text/plain")}); chk("reference upload",r.status_code==201,r.text)
+chk("off-roll cannot read intern's task",off.get(f"/tasks/{tid}").status_code==403)
+chk("workspace locked before accept",intern.get(f"/tasks/{tid}/workspace").json().get("read_only") is True)
+chk("accept",intern.post(f"/tasks/{tid}/accept").status_code==200)
+intern.post(f"/tasks/{tid}/start")
+ws=intern.get(f"/tasks/{tid}/workspace").json()
+r=intern.put(f"/workspaces/{ws['id']}/files",json={"path":"index.html","content":"<h1>Hi</h1>\n"}); chk("create file",r.status_code in(200,201),r.text)
+intern.post("/sessions/start",json={"client_id":"live-check-1"})
+hb=intern.post("/sessions/heartbeat",json={"client_id":"live-check-1","state":"active","task_id":tid}); chk("heartbeat with task_id",hb.status_code==200,hb.text)
+r=intern.post(f"/workspaces/{ws['id']}/submit",json={"note":"first"}); chk("submit -> v1.0 on-roll review",r.status_code in(200,201) and r.json()["version"]=="1.0" and r.json()["stage"]=="onroll_review",r.text)
+s1=r.json()["id"]
+chk("duplicate submit blocked",intern.post(f"/workspaces/{ws['id']}/submit",json={}).status_code==409)
+chk("edit locked in review",intern.put(f"/workspaces/{ws['id']}/files",json={"path":"index.html","content":"x"}).status_code==409)
+chk("intern cannot approve own",intern.post(f"/submissions/{s1}/review",json={"decision":"approved"}).status_code==403)
+chk("admin cannot skip on-roll stage",ad.post(f"/submissions/{s1}/review",json={"decision":"approved"}).status_code==403)
+chk("other on-roll (not reviewer) blocked",onr.post(f"/submissions/{s1}/review",json={"decision":"approved"}).status_code==403)
+chk("reject needs reason",lead.post(f"/submissions/{s1}/review",json={"decision":"rejected"}).status_code==422)
+chk("on-roll rejects",lead.post(f"/submissions/{s1}/review",json={"decision":"rejected","comment":"Title is wrong"}).status_code==200)
+chk("task onroll_rejected",intern.get(f"/tasks/{tid}").json()["status"]=="onroll_rejected")
+intern.put(f"/workspaces/{ws['id']}/files",json={"path":"index.html","content":"<h1>Hello</h1>\n"})
+intern.put(f"/workspaces/{ws['id']}/files",json={"path":"style.css","content":"h1{color:red}"})
+r=intern.post(f"/workspaces/{ws['id']}/submit",json={"note":"fixed"}); s2=r.json()["id"]; chk("resubmit -> v1.1",r.json()["version"]=="1.1",r.text)
+chk("on-roll approves -> admin stage",lead.post(f"/submissions/{s2}/review",json={"decision":"approved","comment":"ok"}).json()["stage"]=="admin_review")
+chk("task under_admin_review",ad.get(f"/tasks/{tid}").json()["status"]=="under_admin_review")
+chk("admin queue has it",any(x["id"]==s2 for x in ad.get("/submissions",params={"view":"queue"}).json()))
+c=ad.get(f"/tasks/{tid}/compare",params={"a":s1,"b":s2}).json()
+chk("compare shows real changes",c["summary"]=={"added":1,"modified":1,"deleted":0} and "+<h1>Hello</h1>" in c["files"][0]["diff"],str(c)[:300])
+old=ad.get(f"/submissions/{s1}").json(); chk("old version intact + comment kept",old["files"][-1]["content"].startswith("<h1>Hi") or any(f["content"]=="<h1>Hi</h1>\n" for f in old["files"]) and old["reviews"][0]["comment"]=="Title is wrong")
+z=ad.get(f"/submissions/{s2}/download"); chk("download zip",z.status_code==200 and "style.css" in zipfile.ZipFile(io.BytesIO(z.content)).namelist())
+rr=ad.post(f"/submissions/{s2}/run",json={"path":"index.html","stdin":""}); chk("snapshot run answers honestly (no Docker here)",rr.status_code in(422,503),rr.text)
+chk("admin rework",ad.post(f"/submissions/{s2}/review",json={"decision":"changes_requested","comment":"Add footer"}).status_code==200)
+intern.put(f"/workspaces/{ws['id']}/files",json={"path":"index.html","content":"<h1>Hello</h1>\n<footer/>\n"})
+s3=intern.post(f"/workspaces/{ws['id']}/submit",json={}).json(); chk("after admin rework goes to on-roll again, v1.2",s3["version"]=="1.2" and s3["stage"]=="onroll_review",str(s3)[:200])
+lead.post(f"/submissions/{s3['id']}/review",json={"decision":"approved"})
+chk("admin final approve -> completed",ad.post(f"/submissions/{s3['id']}/review",json={"decision":"approved"}).status_code==200 and ad.get(f"/tasks/{tid}").json()["status"]=="completed")
+h=[x["action"] for x in ad.get(f"/tasks/{tid}/history").json()]; chk("history complete",all(a in h for a in("created","assigned","accepted","work_started","submitted","version_created","onroll_rejected","resubmitted","onroll_approved","admin_rework_requested","admin_approved","completed")),str(h))
+chk("3 versions listed",[v["version"] for v in ad.get(f"/tasks/{tid}/versions").json()]==["1.2","1.1","1.0"])
+fh=intern.get(f"/workspaces/{ws['id']}/history").json(); chk("file history has created/edited/submitted",{"created","edited","submitted"}<= {e["action"] for e in fh},str({e["action"] for e in fh}))
+n=[x["type"] if "type" in x else x["title"] for x in intern.get("/notifications").json()["items"]]; chk("intern notified",len(n)>=4,str(n))
+# on-roll own task -> admin directly
+t2=ad.post("/tasks",json={"title":"Onroll own","assigned_to":me["onr"]["id"]}).json(); t2=(t2.get("created") or [t2])[0]["id"]
+onr.post(f"/tasks/{t2}/accept"); w2=onr.get(f"/tasks/{t2}/workspace").json(); onr.put(f"/workspaces/{w2['id']}/files",json={"path":"a.py","content":"print(1)"})
+s=onr.post(f"/workspaces/{w2['id']}/submit",json={}).json(); chk("on-roll own task -> admin directly",s["stage"]=="admin_review",str(s)[:200])
+chk("on-roll cannot approve own",onr.post(f"/submissions/{s['id']}/review",json={"decision":"approved"}).status_code==403)
+chk("archive completed task",ad.post(f"/tasks/{tid}/archive").status_code==200 and ad.get(f"/submissions/{s1}").status_code==200)
+chk("timer still works",intern.get("/sessions/current").status_code==200)
+print(sum(ok),"of",len(ok),"passed")
